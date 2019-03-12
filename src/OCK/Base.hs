@@ -171,34 +171,15 @@ pair def (a:[])     = [(a, def)]
 pair def (a1:a2:as) = (a1, a2) : pair def as
 
 
-zoomMatrix :: Int -> Int -> M.Matrix a -> M.Matrix a
-zoomMatrix x y m = undefined
-
-
 matrixToLists :: M.Matrix a -> [[a]]
 matrixToLists m = map (\r -> V.toList $ M.getRow r m) [1..nr]
   where
     nr = M.nrows m
 
 
-matrixToFourLists :: a -> Int -> Int -> M.Matrix a -> [[Four a]]
-matrixToFourLists def rx cx m = do
-  r <- [1 .. (nr * rx) `divRUp` 2]
-  return $ do
-    c <- [1 .. (nc * cx) `divRUp` 2]
-    let fr s     = (pred r * 2 + s) `divRUp` rx
-        fc s     = (pred c * 2 + s) `divRUp` cx
-        el sr sc = M.getElem (fr sr) (fc sc) m'
-    return $ Four (el 1 1) (el 1 2) (el 2 1) (el 2 2)
-  where
-    nr = M.nrows m
-    nc = M.ncols m
-    m' = extend def (succ nr) (succ nc) m
-
-
-matrixToFourLists' :: a -> Int -> Int -> Int -> Int -> M.Matrix a
-                   -> [[Four a]]
-matrixToFourLists' def rx cx tPad lPad m = do
+matrixToFourLists :: a -> Int -> Int -> Int -> Int -> M.Matrix a
+                  -> [[Four a]]
+matrixToFourLists def rx cx tPad lPad m = do
   r <- [1 .. (nr * rx + tPad) `divRUp` 2]
   return $ do
     c <- [1 .. (nc * cx + lPad) `divRUp` 2]
@@ -278,33 +259,54 @@ setBack :: Background -> Picture -> Picture
 setBack bc pic@Picture {..} = pic { picBackground = bc }
 
 
-data Yes = Yes deriving (Show, Eq, Enum)
-instance Read Yes where
+data YesNo
+  = Yes
+  | No
+  deriving (Show, Eq, Enum)
+
+instance Read YesNo where
   readsPrec _ ('Y':'E':'S':str) = [(Yes,str)]
   readsPrec _ ('Y':'e':'s':str) = [(Yes,str)]
   readsPrec _ ('y':'e':'s':str) = [(Yes,str)]
   readsPrec _ ('y':str)         = [(Yes,str)]
+  readsPrec _ ('N':'O':str)     = [(No, str)]
+  readsPrec _ ('N':'o':str)     = [(No, str)]
+  readsPrec _ ('n':'o':str)     = [(No, str)]
+  readsPrec _ ('n':str)         = [(No, str)]
   readsPrec _ _                 = []
 
 
-data On = On deriving (Show, Eq, Enum)
-instance Read On where
-  readsPrec _ ('O':'N':str) = [(On,str)]
-  readsPrec _ ('O':'n':str) = [(On,str)]
-  readsPrec _ ('o':'n':str) = [(On,str)]
-  readsPrec _ _             = []
+data OnOff
+  = On
+  | Off
+  deriving (Show, Eq, Enum)
+
+instance Read OnOff where
+  readsPrec _ ('O':'N':str)     = [(On, str)]
+  readsPrec _ ('O':'n':str)     = [(On, str)]
+  readsPrec _ ('o':'n':str)     = [(On, str)]
+  readsPrec _ ('O':'F':'F':str) = [(Off,str)]
+  readsPrec _ ('O':'f':'f':str) = [(Off,str)]
+  readsPrec _ ('o':'f':'f':str) = [(Off,str)]
+  readsPrec _ _                 = []
 
 
-data STrue = STrue deriving (Show, Eq, Enum)
-instance Read STrue where
-  readsPrec _ ('t':'r':'u':'e':str) = [(STrue,str)]
-  readsPrec _ ('t':str)             = [(STrue,str)]
-  readsPrec _ _                     = []
+data SBool
+  = STrue
+  | SFalse
+  deriving (Show, Eq, Enum)
+
+instance Read SBool where
+  readsPrec _ ('t':'r':'u':'e':str)     = [(STrue, str)]
+  readsPrec _ ('t':str)                 = [(STrue, str)]
+  readsPrec _ ('f':'a':'l':'s':'e':str) = [(SFalse,str)]
+  readsPrec _ ('f':str)                 = [(SFalse,str)]
+  readsPrec _ _                         = []
 
 
 data ReadSomething a = forall b. Read b => RSome (b -> a)
 
-readSomething :: [ReadSomething a] -> [Char] -> [Maybe a]
+readSomething :: [ReadSomething a] -> String -> [Maybe a]
 readSomething rs str = map (\(RSome f) -> fmap f $ maybeRead str) rs
 
 maybeRead :: Read a => String -> Maybe a
@@ -316,9 +318,6 @@ fromEnv envVarName def rs = (fromMaybe def . match) <$> lookupEnv envVarName
   where
     match = (listToMaybe . catMaybes . readSomething rs =<<)
 
-
--- Command Line OCK
--- もしかしたら cTPad が正しくないかもしれない
 
 clock :: Output -> Env -> Vty -> IO ()
 clock out env@(Env {..}) vty = displayBounds out >>= draw
@@ -341,7 +340,7 @@ clock out env@(Env {..}) vty = displayBounds out >>= draw
         cTPad   = (rm `div` 2 + tbPadd * 2) `mod` 2
         cLPad   = (cm `div` 2 + lrPadd * 2) `mod` 2
         clckImg = center tRows tCols $ fourBits clckAttr
-                $ matrixToFourLists' False rx cx cTPad cLPad clckMtx
+                $ matrixToFourLists False rx cx cTPad cLPad clckMtx
         frmeImg = center tRows tCols
                 $ square frmeAttr (tRows - tbMarg * 2) (tCols - lrMarg * 2)
         pic     = setBack (Background ' ' backAttr)
@@ -388,30 +387,8 @@ center rHeight rWidth img = pad padLeft padTop 0 0
     cropT       = rHeight + (iHeight - rHeight) `div` 2
 
 
-
-sec :: IO Double
-sec = read <$> T.formatTime T.defaultTimeLocale "%S%Q" <$> T.getZonedTime
-
-
 withVty :: Config -> (Vty -> IO a) -> IO a
 withVty cfg = bracket (mkVty cfg) shutdown
-
-
-digit :: Int -> M.Matrix Bool
-digit a = if q == 0 then f r else
-    digit q M.<|> partition M.<|> f r
-  where
-    (q, r) = divMod a 10
-    f b | b == 0 = _0
-        | b == 1 = _1
-        | b == 2 = _2
-        | b == 3 = _3
-        | b == 4 = _4
-        | b == 5 = _5
-        | b == 6 = _6
-        | b == 7 = _7
-        | b == 8 = _8
-        | b == 9 = _9
 
 
 fromTime :: String -> M.Matrix Bool
@@ -430,38 +407,14 @@ fromTime ('9':str) = _9    M.<|> partition M.<|> fromTime str
 fromTime (_  :str) = fromTime str
 
 
-vertString :: Attr -> String -> Image
-vertString attr = foldr (\c i -> i <-> char attr c) emptyImage
-
-vertStrings :: Attr -> [String] -> Image
-vertStrings attr = foldr (\s i -> i <-> string attr s) emptyImage
-
-
--- side margin
-frame :: Int -> Int -> Attr -> Image -> Image
-frame vmn hmn attr img = char attr '┌' <|> hor <|> char attr '┐'
-                     <-> verL <|> (marg <-> img <-> marg) <|> verR
-                     <-> char attr '└' <|> hor <|> char attr '┘'
-  where
-    hm   = replicate hmn ' '
-    hor  = string      attr $ replicate (imageWidth img + hmn*2) '─'
-    verL = vertStrings attr $ replicate (imageHeight img + vmn*2) $ "│"++hm
-    verR = vertStrings attr $ replicate (imageHeight img + vmn*2) $ hm++"│"
-    marg = vertStrings attr $ replicate vmn $ replicate (imageWidth img) ' '
-
-
-
 square :: Attr -> Int -> Int -> Image
-square attr v h = char attr '┌' <|> hor <|> char attr '┐'
+square attr h w = char attr '┌' <|> hor <|> char attr '┐'
               <-> ver           <|> mar <|> ver
               <-> char attr '└' <|> hor <|> char attr '┘'
   where
-    hor = string attr $ replicate (h - 2) '─'
-    ver = vertCat $ map (char attr) $ replicate (v - 2) '│'
-    mar = vertCat $ replicate (v - 2) $ string attr $ replicate (h - 2) ' '
-
-
-
+    hor = string attr $ replicate (w - 2) '─'
+    ver = vertCat $ map (char attr) $ replicate (h - 2) '│'
+    mar = charFill attr ' ' (w - 2) (h - 2)
 
 
 divRUp :: Integral a => a -> a -> a
