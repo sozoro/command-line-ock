@@ -1,4 +1,4 @@
-{ nixpkgs ? import <nixpkgs> {}, compiler ? "ghc863" }:
+{ nixpkgs ? import <nixpkgs> {}, compiler ? "ghc865" }:
 let
   config = {
     packageOverrides = super: let self = super.pkgs; in {

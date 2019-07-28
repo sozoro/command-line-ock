@@ -11,9 +11,12 @@ import qualified Data.Time   as T
 import Control.Monad      (forever)
 import Control.Exception  (bracket)
 import Data.Maybe         (listToMaybe,fromMaybe,catMaybes)
-import Numeric (readHex)
+import Numeric            (readHex)
 import System.Timeout     (timeout)
 import System.Environment (lookupEnv,setEnv,unsetEnv)
+
+import qualified Data.Four as F
+import Data.Matrix.Functions
 
 
 partition :: M.Matrix Bool
@@ -112,89 +115,6 @@ _9 = let { l = True; o = False; } in M.fromLists [ [l, l, l]
                                                  , [l, l, l]
                                                  ]
 
-data Four a = Four a a
-                   a a
-  deriving (Show, Eq, Functor)
-
-
-fromFourBit :: Four Bool -> Int
-fromFourBit = f . fmap fromEnum
-  where
-    f :: Four Int -> Int
-    f (Four a b c d) = 2 ^ 0 * a + 2 ^ 1 * b + 2 ^ 2 * c + 2 ^ 3 * d
-
-
-fourBit :: Attr -> Four Bool -> Image
-fourBit attr = char attr . fourBit'
-
-fourBit' :: Four Bool -> Char
-fourBit' = fourBitBlock . fromFourBit
-
-fourBitBlock :: Int -> Char
-fourBitBlock n = case n of
-  0  -> ' '
-  1  -> '▘'
-  2  -> '▝'
-  3  -> '▀'
-  4  -> '▖'
-  5  -> '▌'
-  6  -> '▞'
-  7  -> '▛'
-  8  -> '▗'
-  9  -> '▚'
-  10 -> '▐'
-  11 -> '▜'
-  12 -> '▄'
-  13 -> '▙'
-  14 -> '▟'
-  15 -> '█'
-
-
-toFour :: Int -> Int -> a -> [[a]] -> [[Four a]]
-toFour x y def lss = map (map tupleToFour . uncurry zip)
-                   $ zoom (replicate nc (def, def)) y $ map (zoom def x) lss
-                   where
-                     nc = length $ head lss
-
-
-tupleToFour :: ((a, a), (a, a)) -> Four a
-tupleToFour ((a, b), (c, d)) = Four a b c d
-
-
-zoom :: a -> Int -> [a] -> [(a, a)]
-zoom def n = pair def . concatMap (replicate n)
-
-
-pair :: a -> [a] -> [(a, a)]
-pair _   []         = []
-pair def (a:[])     = [(a, def)]
-pair def (a1:a2:as) = (a1, a2) : pair def as
-
-
-matrixToLists :: M.Matrix a -> [[a]]
-matrixToLists m = map (\r -> V.toList $ M.getRow r m) [1..nr]
-  where
-    nr = M.nrows m
-
-
-matrixToFourLists :: a -> Int -> Int -> Int -> Int -> M.Matrix a
-                  -> [[Four a]]
-matrixToFourLists def rx cx tPad lPad m = do
-  r <- [1 .. (nr * rx + tPad) `divRUp` 2]
-  return $ do
-    c <- [1 .. (nc * cx + lPad) `divRUp` 2]
-    let el sr sc = let r' = (pred r * 2 + sr) - tPad
-                       c' = (pred c * 2 + sc) - lPad
-                   in  if r' > 0 && c' > 0
-                       then M.getElem (r' `divRUp` rx) (c' `divRUp` cx) m'
-                       else def
-    return $ Four (el 1 1) (el 1 2) (el 2 1) (el 2 2)
-  where
-    nr = M.nrows m
-    nc = M.ncols m
-    m' = extend def (succ nr) (succ nc) m
-
-
 data Env = Env
   { tbMarg    :: Int
   , lrMarg    :: Int
@@ -213,7 +133,7 @@ main = do
   out       <- outputForConfig cfg
   tbMarg    <- fromEnv "OCK_TopBottomMargine" 2  [RSome id]
   lrMarg    <- fromEnv "OCK_LeftRightMargine" 1  [RSome id]
-  tbPadd    <- fromEnv "OCK_TopBottomPadding" 10 [RSome id]
+  tbPadd    <- fromEnv "OCK_TopBottomPadding" 4 [RSome id]
   lrPadd    <- fromEnv "OCK_LeftRightPadding" 3  [RSome id]
   forceEven <- fromEnv "OCK_ForceEven" False
     [RSome id, RSome (== 1), RSome (== Yes), RSome (== On), RSome (== STrue)]
@@ -356,12 +276,6 @@ clock out env@(Env {..}) vty = displayBounds out >>= draw
     _                         -> evLoop
 
 
-padTop :: a -> Int -> M.Matrix a -> M.Matrix a
-padTop def n m = M.matrix n (M.ncols m) (const def) M.<-> m
-
-padBottom :: a -> Int -> M.Matrix a -> M.Matrix a
-padBottom def n m = m M.<-> M.matrix n (M.ncols m) (const def)
-
 -- TODO: Top Bottom
 
 
@@ -417,22 +331,5 @@ square attr h w = char attr '┌' <|> hor <|> char attr '┐'
     mar = charFill attr ' ' (w - 2) (h - 2)
 
 
-divRUp :: Integral a => a -> a -> a
-divRUp x y = div (x + y - 1) y
-
-
-extend :: a -> Int -> Int -> M.Matrix a -> M.Matrix a
-extend def newR newC m = m''
-  where
-   rDiff = newR - M.nrows m
-   cDiff = newC - M.ncols m
-   m'    = if rDiff <= 0 then m  else m  M.<-> mono def rDiff (M.ncols m)
-   m''   = if cDiff <= 0 then m' else m' M.<|> mono def (M.nrows m') cDiff
-
-
-mono :: a -> Int -> Int -> M.Matrix a
-mono def r c = M.matrix r c (const def)
-
-
-fourBits :: Attr -> [[Four Bool]] -> Image
-fourBits attr = foldMap (string attr . map fourBit')
+fourBits :: Attr -> [[F.Four Bool]] -> Image
+fourBits attr = foldMap (string attr . map F.fourBitToBlock)
